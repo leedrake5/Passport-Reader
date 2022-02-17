@@ -12,7 +12,7 @@ This code is designed to help facilitate the reading of the MRZ codes of passpor
 
 These landmarks can be used to define a face. But because passport images are conservative (e.g. face orientation and dimensions is intended to be consistent) we can extraploate passport document boundaries based on these landmarks (red dots in the above figure). Note that we have also adjusted brightness and contrast to increase the contrast of text to backround to facilitate document reading. 
 
-![alt text](https://raw.githubusercontent.com/leedrake5/Passport-Reader/master/examples/astley_skew.jpg)
+![alt text](https://raw.githubusercontent.com/leedrake5/Passport-Reader/master/examples/astley_skew.jpeg)
 
 In the event a passport document is extremely skewed - e.g. the placement of the passport is uneven - we can use these MTCNN landmarks to properly orient the document to once again facilitate document processing. 
 
