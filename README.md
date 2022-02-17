@@ -16,8 +16,8 @@ These landmarks can be used to define a face. But because passport images are co
 
 In the event a passport document is extremely skewed - e.g. the placement of the passport is uneven - we can use these MTCNN landmarks to properly orient the document to once again facilitate document processing. 
 
-![alt text](https://raw.githubusercontent.com/leedrake5/Passport-Reader/master/examples/astley_temp.jpg)
+![alt text](https://raw.githubusercontent.com/leedrake5/Passport-Reader/master/examples/astley_temp.jpeg)
 
-Just like that! Once the document is ready for reading, we can use [PassportEye](https://github.com/konstantint/PassportEye) to process the document and extract usable data to verify or generate information. 
+Just like that! Once the document is ready for reading, we can use [PassportEye](https://github.com/konstantint/PassportEye) to process the document and extract usable data to verify or generate information. This uses the MRZ code (bottom two lines of code at the bottom of the passport) to extract key information like passport number, date of birth, and date of expiry.
 
 ![alt text](https://raw.githubusercontent.com/leedrake5/Passport-Reader/master/examples/example_output.jpeg)
