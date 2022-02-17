@@ -6,6 +6,7 @@
 ###Most Functional, minimal version
 ###Note that this requires tesseract to be installed externally, and the ORCB library.
 
+#pip install pytesseract pyttsx3 typing blend_modes pyspellchecker pdf2image pillow passporteye facenet_pytorch matplotlib openpyxl imutils numpy scipy pandas multiprocess opencv-python
 
 # importing neccessary libraries
 
@@ -23,7 +24,6 @@ from spellchecker import SpellChecker
 import requests
 from urllib.request import urlopen
 import sys
-import pytesseract
 import pandas as pd
 import pdf2image
 from pdf2image import convert_from_path, convert_from_bytes
@@ -44,6 +44,9 @@ from io import BytesIO
 from time import sleep
 from multiprocessing import Pool
 import openpyxl
+import imutils
+from scipy.ndimage.interpolation import rotate
+import pickle
 
 ####Avoid unecessary warnings
 def warn(*args, **kwargs):
@@ -74,7 +77,7 @@ def readMRZ(image_path):
 	if calculateAge(mrz_frame["Date of Birth"].astype("string")[0])<0:
 		mrz_frame["Date of Birth"] = datetime.strftime(datetime.strptime(mrz_frame["Date of Birth"].astype("string")[0], "%m/%d/%Y") - relativedelta(years=100), "%m/%d/%Y")
 	return mrz_frame
-	
+
 #####################################
 ###########Loading Data##############
 #####################################
@@ -92,17 +95,17 @@ def passportByteStream(image_path):
         img_page=cv2.imread(image_path)
     return img_page
 
-def passportCV(image_path):
+def passportCV(image_path, temp_path="~/"):
     extension = "." + image_path.split(".", 2)[1].upper()
     file = image_path.split(".", 2)[0]
     if extension==".PDF":
         page = convert_from_path(image_path)[0]
-        page.save(file + "_temp.jpeg", "JPEG")
-        img = cv2.imread(file + "_temp.jpeg")
+        page.save(temp_path + "_temp.jpeg", "JPEG")
+        img = cv2.imread(temp_path + "_temp.jpeg")
     else:
         img=cv2.imread(image_path)
     return img
-    
+
 ####These are URL veresions of the above functions
 def url_to_image(url, readFlag=cv2.IMREAD_COLOR):
     # download the image, convert it to a NumPy array, and then read
@@ -142,7 +145,7 @@ def passportCVOnline(image_path, temp_path):
         image = np.asarray(bytearray(resp.read()), dtype="uint8")
         img = cv2.imdecode(image, cv2.IMREAD_COLOR)
     return img
-    
+
 
 #####################################
 ########Image Processing#############
@@ -171,6 +174,7 @@ def correct_skew(image, delta=1, limit=5):
     return best_angle, rotated
 
 
+
 ####Much more complicated and slower skew correct
 debug = True
 
@@ -186,7 +190,7 @@ def display(img, frameName="OpenCV Image"):
     cv2.waitKey(0)
 
 #rotate the image with given theta value
-def rotate(img, theta):
+def rotate_legacy(img, theta):
     rows, cols = img.shape[0], img.shape[1]
     image_center = (cols/2, rows/2)
     M = cv2.getRotationMatrix2D(image_center,theta,1)
@@ -258,7 +262,7 @@ def main(filePath):
     #find the average of all cumulative theta value
     orientation = cummTheta/ct
     print("Image orientation in degress: ", orientation)
-    finalImage = rotate(img, orientation)
+    finalImage = rotate_legacy(img, orientation)
     display(textImg, "Detectd Text minimum bounding box")
     display(finalImage, "Deskewed Image")
 
@@ -311,7 +315,7 @@ def mainOnline(image_path, temp_path):
     #find the average of all cumulative theta value
     orientation = cummTheta/ct
     print("Image orientation in degress: ", orientation)
-    finalImage = rotate(img, orientation)
+    finalImage = rotate_legacy(img, orientation)
     display(textImg, "Detectd Text minimum bounding box")
     display(finalImage, "Deskewed Image")
 
@@ -421,7 +425,7 @@ def detectRectangleCrop(img):
             x,y,w,h = rect
             out = img[y+10:y+h-10,x+10:x+w-10]
     return rects[0]
-    
+
 
 #####################################
 ########Face Detection###############
@@ -489,8 +493,35 @@ def draw_image_with_boxes_debug(data):
         ax.scatter(landmark[:, 0], landmark[:, 1], s=8)
     fig.show()
 
+
+
+def NormalizeData(data):
+    return (data - np.min(data)) / (np.max(data) - np.min(data))
+
+def riseRun(coord_1, coord_2):
+    d_x = coord_2[0]-coord_1[0]
+    d_y = coord_2[1]-coord_1[1]
+    return d_y/d_x
+
+def faceSlope(landmarks):
+    landmarks = NormalizeData(landmarks)
+    coord_2 = landmarks[0][1,]
+    coord_1 = landmarks[0][3,]
+    return riseRun(coord_1, coord_2)
+
+def slopeAngle(m1, m2):
+    numerator = m2 - m1
+    denominator = 1 + (m1*m2)
+    return math.degrees(numerator/denominator)
+
+def faceDegrees(landmarks):
+    m1 = -1.2281231
+    m2 = faceSlope(landmarks)
+    return slopeAngle(m1, m2)
+    
+
 ####Face ID detection. This is the basic function. It works by detecitng the face in the data, measures its height and width, and then adds multipliers (left, top, right, and bottom) to generate internall measures of passport dimensions.
-def faceIDPre(data, left=0.64, top=0.875, right=4.2, bottom=2.5):
+def faceIDSimple(data, left=0.64, top=0.875, right=4.2, bottom=2.5, delta=0.5):
     boxes, probs, landmarks = detector.detect(data, landmarks=True)
     throw = len(boxes)
     passport_dim = boxes[0]
@@ -512,44 +543,70 @@ def faceIDPre(data, left=0.64, top=0.875, right=4.2, bottom=2.5):
     #im1 = data.crop(passport_dim)
     im1 = data[passport_dim[1]:passport_dim[3], passport_dim[0]:passport_dim[2]]
     return(im1)
-    
+
+def faceIDPre(data, left=0.64, top=0.875, right=4.2, bottom=2.5, delta=0.5):
+    boxes, probs, landmarks = detector.detect(data, landmarks=True)
+    data = rotate(data, angle=faceDegrees(landmarks))
+    data = correct_skew(data, delta=delta, limit=1)[1]
+    boxes, probs, landmarks = detector.detect(data, landmarks=True)
+    throw = len(boxes)
+    passport_dim = boxes[0]
+    vert = passport_dim[2] - passport_dim[0]
+    horz = passport_dim[3] - passport_dim[1]
+    passport_dim[0] = np.round(passport_dim[0]-(horz-(horz*left)), 0)
+    if passport_dim[0] < 0:
+        passport_dim[0]=0
+    passport_dim[1] = np.round(passport_dim[1]-(vert+(vert*top)), 0)
+    if passport_dim[1] < 0:
+        passport_dim[1]=0
+    passport_dim[2] = np.round(passport_dim[2]+horz*right, 0)
+    if passport_dim[2] > data.shape[1]:
+        passport_dim[2]=data.shape[1]
+    passport_dim[3] = np.round(passport_dim[3]+vert*bottom, 0)
+    if passport_dim[3] > data.shape[0]:
+        passport_dim[3]=data.shape[0]
+    passport_dim = passport_dim.astype(int)
+    #im1 = data.crop(passport_dim)
+    im1 = data[passport_dim[1]:passport_dim[3], passport_dim[0]:passport_dim[2]]
+    return(im1)
+
 ###This checks the faceID function against multiple image orientations
-def faceIDFull(data, left=0.64, top=0.875, right=4.2, bottom=2.5):
+def faceIDFull(data, left=0.64, top=0.875, right=4.2, bottom=2.5, delta=0.5):
     try:
         new_data = correct_skew(data, delta=0.5, limit=1)[1]
-        result = faceIDPre(new_data, left=left, top=top, right=right, bottom=bottom)
+        result = faceIDPre(new_data, left=left, top=top, right=right, bottom=bottom, delta=delta)
         return result
     except:
         try:
             data90 = np.rot90(data, k=1)
             data90 = correct_skew(data90, delta=0.5, limit=1)[1]
-            result = faceIDPre(data90, left=left, top=top, right=right, bottom=bottom)
+            result = faceIDPre(data90, left=left, top=top, right=right, bottom=bottom, delta=delta)
             return result
         except:
             try:
                 data270 = np.rot90(data, k=3)
                 data270 = correct_skew(data180, delta=0.5, limit=1)[1]
-                result = faceIDPre(data270, left=left, top=top, right=right, bottom=bottom)
+                result = faceIDPre(data270, left=left, top=top, right=right, bottom=bottom, delta=delta)
                 return result
             except:
                 try:
                     data180 = np.rot90(data, k=2)
                     data180 = correct_skew(data180, delta=0.5, limit=1)[1]
-                    result = faceIDPre(data180, left=left, top=top, right=right, bottom=bottom)
+                    result = faceIDPre(data180, left=left, top=top, right=right, bottom=bottom, delta=delta)
                     return result
                 except:
                     pass
 
 ##Default faceID function, takes image and on failure rotates 90 degrees.
-def faceID(data, left=0.64, top=0.875, right=4.2, bottom=2.5):
+def faceID(data, left=0.64, top=0.875, right=4.2, bottom=2.5, delta=0.5):
     try:
         new_data = correct_skew(data, delta=0.5, limit=1)[1]
-        result = faceIDPre(new_data, left=left, top=top, right=right, bottom=bottom)
+        result = faceIDPre(new_data, left=left, top=top, right=right, bottom=bottom, delta=delta)
         return result
     except:
         data90 = np.rot90(data, k=1)
         data90 = correct_skew(data90, delta=0.5, limit=1)[1]
-        result = faceIDPre(data90, left=left, top=top, right=right, bottom=bottom)
+        result = faceIDPre(data90, left=left, top=top, right=right, bottom=bottom, delta=delta)
         return result
 
 ###Simple combination of facial recognition and tesseract
@@ -570,11 +627,12 @@ def readMRZCrop(image_path):
     result = readMRZ(file + "_temp.jpeg")
     return result
 
-###URL fetching combination of facial recogniton and tesseract. Note that this will atempt once, flip upsidedown, then continue.
-def readMRZCropOnline(image_path, temp_path, brightness=-27, contrast=-32, left=0.64, top=0.875, right=4.2, bottom=2.5, name="temp"):
-    img = apply_brightness_contrast(correct_skew(passportCVOnline(image_path=image_path, temp_path=temp_path), delta=0.5, limit=1)[1], brightness, contrast)
+###Local file combination of facial recogniton and tesseract. Note that this will atempt once, flip upsidedown, then continue.
+def readMRZCropFile(image_path, temp_path, brightness=-27, contrast=-32, left=0.64, top=0.875, right=4.2, bottom=2.5, delta=0.5, name="temp"):
+    img = apply_brightness_contrast(correct_skew(passportCV(image_path=image_path, temp_path=temp_path), delta=delta, limit=1)[1], brightness, contrast)
     try:
-        img1 = faceID(img, left=left, top=top, right=right, bottom=bottom)
+        img1 = faceIDSimple(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
+        img1 = correct_skew(img1, delta=delta, limit=1)[1]
         rect = deleteBlackBorder(img1)
         im = Image.fromarray(rect)
         im.save(temp_path + name + ".jpeg", "JPEG")
@@ -582,7 +640,28 @@ def readMRZCropOnline(image_path, temp_path, brightness=-27, contrast=-32, left=
         return result
     except:
         img = np.rot90(img, k=2)
-        img1 = faceID(img, left=left, top=top, right=right, bottom=bottom)
+        img1 = faceIDFull(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
+        img1 = correct_skew(img1, delta=delta, limit=1)[1]
+        rect = deleteBlackBorder(img1)
+        im = Image.fromarray(rect)
+        im.save(temp_path + name + ".jpeg", "JPEG")
+        result = readMRZ(temp_path + name + ".jpeg")
+        return result
+
+
+###URL fetching combination of facial recogniton and tesseract. Note that this will atempt once, flip upsidedown, then continue.
+def readMRZCropOnline(image_path, temp_path, brightness=-27, contrast=-32, left=0.64, top=0.875, right=4.2, bottom=2.5, delta=0.5, name="temp"):
+    img = apply_brightness_contrast(correct_skew(passportCVOnline(image_path=image_path, temp_path=temp_path), delta=delta, limit=1)[1], brightness, contrast)
+    try:
+        img1 = faceIDSimple(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
+        rect = deleteBlackBorder(img1)
+        im = Image.fromarray(rect)
+        im.save(temp_path + name + ".jpeg", "JPEG")
+        result = readMRZ(temp_path + name + ".jpeg")
+        return result
+    except:
+        img = np.rot90(img, k=2)
+        img1 = faceIDFull(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
         rect = deleteBlackBorder(img1)
         im = Image.fromarray(rect)
         im.save(temp_path + name + ".jpeg", "JPEG")
@@ -590,10 +669,10 @@ def readMRZCropOnline(image_path, temp_path, brightness=-27, contrast=-32, left=
         return result
 
 ###Numpy darray combination of facial recogniton and tesseract. Note that this will atempt once, flip upsidedown, then continue. This assumes images have already been loaded
-def readMRZCropNative(image_object, temp_path, brightness=-27, contrast=-32, left=0.64, top=0.875, right=4.2, bottom=2.5, name="temp"):
-    img = apply_brightness_contrast(correct_skew(image_object, delta=0.5, limit=1)[1], brightness, contrast)
+def readMRZCropNative(image_object, temp_path, brightness=-27, contrast=-32, left=0.64, top=0.875, right=4.2, bottom=2.5, delta=0.5, name="temp"):
+    img = apply_brightness_contrast(correct_skew(image_object, delta=delta, limit=1)[1], brightness, contrast)
     try:
-        img1 = faceID(img, left=left, top=top, right=right, bottom=bottom)
+        img1 = faceIDSimple(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
         rect = deleteBlackBorder(img1)
         im = Image.fromarray(rect)
         im.save(temp_path + name + ".jpeg", "JPEG")
@@ -601,7 +680,7 @@ def readMRZCropNative(image_object, temp_path, brightness=-27, contrast=-32, lef
         return result
     except:
         img = np.rot90(img, k=2)
-        img1 = faceID(img, left=left, top=top, right=right, bottom=bottom)
+        img1 = faceIDFull(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
         rect = deleteBlackBorder(img1)
         im = Image.fromarray(rect)
         im.save(temp_path + name + ".jpeg", "JPEG")
@@ -663,7 +742,6 @@ def readMRZCropContour(image_path):
     result = readMRZ(file + "_temp.jpeg")
     return result
 
-import imutils
 
 def readMRZCropBorders(image_path):
     file = image_path.split(".", 2)[0]
