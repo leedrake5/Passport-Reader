@@ -21,3 +21,5 @@ In the event a passport document is extremely skewed - e.g. the placement of the
 Just like that! Once the document is ready for reading, we can use [PassportEye](https://github.com/konstantint/PassportEye) to process the document and extract usable data to verify or generate information. This uses the MRZ code (bottom two lines of code at the bottom of the passport) to extract key information like passport number, date of birth, and date of expiry.
 
 ![alt text](https://raw.githubusercontent.com/leedrake5/Passport-Reader/master/examples/example_output.png)
+
+Data Privacy note: the passport photos used in this example are not real, they are training examples provided [here](https://www.consilium.europa.eu/prado/en/prado-documents/AFG/A/docs-per-category.html). No one's personal information is disclosed in this GitHub repo. 
