@@ -35,8 +35,12 @@ from datetime import datetime
 from datetime import date
 from dateutil.relativedelta import relativedelta
 #detector = MTCNN(keep_all=True, device='cuda')  ###This is a GPU optimized version, much faster on supported hardware
-from mtcnn import MTCNN
-detector = MTCNN()
+#from mtcnn import MTCNN
+#detector = MTCNN()
+from facenet_pytorch import MTCNN, InceptionResnetV1
+resnet = InceptionResnetV1(pretrained='vggface2').eval()
+#detector = MTCNN(keep_all=True, device='cuda')  ###This is a GPU optimized version, much faster on supported hardware
+detector = MTCNN(keep_all=True)
 from matplotlib import pyplot as plt
 import matplotlib.patches as patches
 from io import BytesIO
@@ -50,8 +54,8 @@ import importlib
 import sys
 import os
 
-###In case you want to use the Github version
-#sys.path.append(os.path.abspath("~/GitHub/image-super-resolution/"))
+###In case you want to use the Github version of ISR
+sys.path.append(os.path.abspath("~/GitHub/image-super-resolution/"))
 
 from ISR.models import RDN, RRDN
 rdn = RDN(weights='psnr-large')
@@ -575,7 +579,8 @@ def mtcnnResults(data):
 def draw_image_with_boxes(filename):
     # load the image
     data = correct_skew(passportCV(filename), delta=0.5, limit=1)[1]
-    boxes, probs, landmarks = mtcnnResults(data)
+    boxes, probs, landmarks = detector.detect(data, landmarks=True)
+    #boxes, probs, landmarks = mtcnnResults(data)
     # plot the image
     fig, ax = plt.subplots(figsize=(16, 12))
     ax.imshow(data)
@@ -604,7 +609,8 @@ def draw_image_with_boxes(filename):
 ####Same as above, but you can put a numpy darray instead of a filepath
 def draw_image_with_boxes_debug(data):
     # load the image
-    boxes, probs, landmarks = mtcnnResults(data)
+    #boxes, probs, landmarks = mtcnnResults(data)
+    boxes, probs, landmarks = detector.detect(data, landmarks=True)
     # plot the image
     fig, ax = plt.subplots(figsize=(16, 12))
     ax.imshow(data)
@@ -658,7 +664,8 @@ def faceDegrees(landmarks):
     
 ####Face ID detection. This is the basic function. It works by detecitng the face in the data, measures its height and width, and then adds multipliers (left, top, right, and bottom) to generate internall measures of passport dimensions.
 def faceIDSimple(data, left=0.64, top=0.875, right=4.2, bottom=2.5, delta=0.5):
-    boxes, probs, landmarks = mtcnnResults(data)
+    #boxes, probs, landmarks = mtcnnResults(data)
+    boxes, probs, landmarks = detector.detect(data, landmarks=True)
     throw = len(boxes)
     passport_dim = boxes[0]
     vert = passport_dim[2] - passport_dim[0]
@@ -681,10 +688,12 @@ def faceIDSimple(data, left=0.64, top=0.875, right=4.2, bottom=2.5, delta=0.5):
     return(im1)
 
 def faceIDPre(data, left=0.64, top=0.875, right=4.2, bottom=2.5, delta=0.5):
-    boxes, probs, landmarks = mtcnnResults(data)
+    #boxes, probs, landmarks = mtcnnResults(data)
+    boxes, probs, landmarks = detector.detect(data, landmarks=True)
     data = rotate(data, angle=faceDegrees(landmarks))
     data = correct_skew(data, delta=delta, limit=1)[1]
-    boxes, probs, landmarks = mtcnnResults(data)
+    boxes, probs, landmarks = detector.detect(data, landmarks=True)
+    #boxes, probs, landmarks = mtcnnResults(data)
     throw = len(boxes)
     passport_dim = boxes[0]
     vert = passport_dim[2] - passport_dim[0]
@@ -774,7 +783,7 @@ def readMRZCropFile(image_path, temp_path, brightness=-27, contrast=-32, left=0.
         im = Image.fromarray(rect)
         im.save(temp_path + name + "_Final.jpeg", "JPEG")
         result = readMRZ(temp_path + name + "_Final.jpeg")
-        rect = passportUpscale(rect)
+        rect = passportUpscale(img)
         im = Image.fromarray(cv2.cvtColor(rect, cv2.COLOR_BGR2RGB))
         im.save(temp_path + name + "_Final.jpeg", "JPEG")
         return result
@@ -786,7 +795,7 @@ def readMRZCropFile(image_path, temp_path, brightness=-27, contrast=-32, left=0.
         im = Image.fromarray(rect)
         im.save(temp_path + name + "_Final.jpeg", "JPEG")
         result = readMRZ(temp_path + name + "_Final.jpeg")
-        rect = passportUpscale(rect)
+        rect = passportUpscale(img)
         im = Image.fromarray(cv2.cvtColor(rect, cv2.COLOR_BGR2RGB))
         im.save(temp_path + name + "_Final.jpeg", "JPEG")
         return result
@@ -802,7 +811,7 @@ def readMRZCropOnline(image_path, temp_path, brightness=-27, contrast=-32, left=
         im = Image.fromarray(rect)
         im.save(temp_path + name + "_Final.jpeg", "JPEG")
         result = readMRZ(temp_path + name + "_Final.jpeg")
-        rect = passportUpscale(rect)
+        rect = passportUpscale(img)
         im = Image.fromarray(cv2.cvtColor(rect, cv2.COLOR_BGR2RGB))
         im.save(temp_path + name + "_Final.jpeg", "JPEG")
         return result
@@ -813,7 +822,7 @@ def readMRZCropOnline(image_path, temp_path, brightness=-27, contrast=-32, left=
         im = Image.fromarray(rect)
         im.save(temp_path + name + "_Final.jpeg", "JPEG")
         result = readMRZ(temp_path + name + "_Final.jpeg")
-        rect = passportUpscale(rect)
+        rect = passportUpscale(img)
         im = Image.fromarray(cv2.cvtColor(rect, cv2.COLOR_BGR2RGB))
         im.save(temp_path + name + "_Final.jpeg", "JPEG")
         return result
