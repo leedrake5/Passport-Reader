@@ -6,7 +6,7 @@
 ###Most Functional, minimal version
 ###Note that this requires tesseract to be installed externally, and the ORCB library.
 
-#pip install pytesseract pyttsx3 typing blend_modes pyspellchecker pdf2image pillow passporteye facenet_pytorch matplotlib openpyxl imutils numpy scipy pandas multiprocess opencv-python
+#pip install pytesseract pyttsx3 typing blend_modes pyspellchecker pdf2image pillow passporteye matplotlib openpyxl imutils numpy scipy pandas multiprocess opencv-python mtcnn
 
 # importing neccessary libraries
 
@@ -34,10 +34,9 @@ from passporteye import read_mrz
 from datetime import datetime
 from datetime import date
 from dateutil.relativedelta import relativedelta
-from facenet_pytorch import MTCNN, InceptionResnetV1
-resnet = InceptionResnetV1(pretrained='vggface2').eval()
 #detector = MTCNN(keep_all=True, device='cuda')  ###This is a GPU optimized version, much faster on supported hardware
-detector = MTCNN(keep_all=True)
+from mtcnn import MTCNN
+detector = MTCNN()
 from matplotlib import pyplot as plt
 import matplotlib.patches as patches
 from io import BytesIO
@@ -47,6 +46,23 @@ import openpyxl
 import imutils
 from scipy.ndimage.interpolation import rotate
 import pickle
+import importlib
+import sys
+import os
+
+###In case you want to use the Github version
+#sys.path.append(os.path.abspath("~/GitHub/image-super-resolution/"))
+
+from ISR.models import RDN, RRDN
+rdn = RDN(weights='psnr-large')
+rrdn = RRDN(weights='gans')
+
+#import os
+#import tensorflow as tf
+#import tensorflow_hub as hub
+#os.environ["TFHUB_DOWNLOAD_PROGRESS"] = "True"
+
+#model = hub.load("https://tfhub.dev/captain-pool/esrgan-tf2/1")
 
 ####Avoid unecessary warnings
 def warn(*args, **kwargs):
@@ -82,7 +98,63 @@ def readMRZ(image_path):
 ###########Loading Data##############
 #####################################
 
-####Data loading. These functions check if the file is a PDF or image and process accordingly.
+####Data loading and AI upscaling. These functions check if the file is a PDF or image and process accordingly.
+
+###Passport upscaling
+def preprocess_image(image_path):
+  """ Loads image from path and preprocesses to make it model ready
+      Args:
+        image_path: Path to the image file
+  """
+  hr_image = tf.image.decode_image(tf.io.read_file(image_path))
+  # If PNG, remove the alpha channel. The model only supports
+  # images with 3 color channels.
+  if hr_image.shape[-1] == 4:
+    hr_image = hr_image[...,:-1]
+  hr_size = (tf.convert_to_tensor(hr_image.shape[:-1]) // 4) * 4
+  hr_image = tf.image.crop_to_bounding_box(hr_image, 0, 0, hr_size[0], hr_size[1])
+  hr_image = tf.cast(hr_image, tf.float32)
+  return tf.expand_dims(hr_image, 0)
+
+def preprocess_image_online(image_path):
+  """ Loads image from path and preprocesses to make it model ready
+      Args:
+        image_path: Path to the image file
+  """
+  hr_image = tf.image.decode_image(requests.get(image_path).content)
+  # If PNG, remove the alpha channel. The model only supports
+  # images with 3 color channels.
+  if hr_image.shape[-1] == 4:
+    hr_image = hr_image[...,:-1]
+  hr_size = (tf.convert_to_tensor(hr_image.shape[:-1]) // 4) * 4
+  hr_image = tf.image.crop_to_bounding_box(hr_image, 0, 0, hr_size[0], hr_size[1])
+  hr_image = tf.cast(hr_image, tf.float32)
+  return tf.expand_dims(hr_image, 0)
+
+def save_image(image, filename):
+  """
+    Saves unscaled Tensor Images.
+    Args:
+      image: 3D image tensor. [height, width, channels]
+      filename: Name of the file to save.
+  """
+  if not isinstance(image, Image.Image):
+    image = tf.clip_by_value(image, 0, 255)
+    image = Image.fromarray(tf.cast(image, tf.uint8).numpy())
+  image.save("%s.jpg" % filename)
+  print("Saved as %s.jpg" % filename)
+
+def passportUpscale(im_tensor):
+    upscale_image = model(im_tensor)
+    upscale_image = tf.squeeze(upscale_image)
+    if not isinstance(upscale_image, Image.Image):
+        image = tf.clip_by_value(upscale_image, 0, 255)
+        image = Image.fromarray(tf.cast(image, tf.uint8).numpy())
+    else:
+        image = upscale_image
+    return image
+
+
 def passportByteStream(image_path):
     extension = "." + image_path.split(".", 2)[1].upper()
     if extension==".PDF":
@@ -105,6 +177,20 @@ def passportCV(image_path, temp_path="~/"):
     else:
         img=cv2.imread(image_path)
     return img
+
+def passportCVUpscale(image_path, temp_path="~/", name="temp"):
+    extension = "." + image_path.split(".", 2)[1].upper()
+    file = image_path.split(".", 2)[0]
+    if extension==".PDF":
+        page = convert_from_path(image_path)[0]
+        page.save(temp_path + "_temp.jpeg", "JPEG")
+        img = preprocess_image(temp_path + "_temp.jpeg")
+    else:
+        img=preprocess_image(image_path)
+    up_im = passportUpscale(img)
+    save_image(up_im, temp_path + name + "_Final")
+    new_img = cv2.imread(temp_path + name + "_Final.jpg")
+    return new_img
 
 ####These are URL veresions of the above functions
 def url_to_image(url, readFlag=cv2.IMREAD_COLOR):
@@ -145,6 +231,48 @@ def passportCVOnline(image_path, temp_path):
         image = np.asarray(bytearray(resp.read()), dtype="uint8")
         img = cv2.imdecode(image, cv2.IMREAD_COLOR)
     return img
+
+def passportCVUpscaleOnline(image_path, temp_path="~/", name="temp"):
+    extension = fileExt(image_path).upper()
+    file = image_path.split(".", 2)[0]
+    if extension==".PDF":
+        resp = requests.get(image_path)
+        page = convert_from_bytes(resp.content)[0]
+        page.save(temp_path + "_temp.jpeg", "JPEG")
+        img = preprocess_image(temp_path + "_temp.jpeg")
+    else:
+        img=preprocess_image_online(image_path)
+    up_im = passportUpscale(img)
+    save_image(up_im, temp_path + name + "_Final")
+    new_img = cv2.imread(temp_path + name + "_Final.jpg")
+    return new_img
+
+
+####Legacy image upscaling, depends on tensorflow 2.0 and ISR
+
+def passportUpscale(data):
+    sr_img = rrdn.predict(data)
+    #sr_img = rdn.predict(sr_img)
+    return(sr_img)
+    
+def passportUpscaleFile(filepath, temp_path="~/"):
+    data = passportCV(image_path=filepath, temp_path=temp_path)
+    data_upscale = passportUpscale(data)
+    data_img = Image.fromarray(cv2.cvtColor(data_upscale, cv2.COLOR_BGR2RGB))
+    return(data_img)
+
+def passportUpscaleNative(data):
+    data_upscale = passportUpscale(data)
+    data_img = Image.fromarray(cv2.cvtColor(data_upscale, cv2.COLOR_BGR2RGB))
+    return data_img
+
+def makePassportPrettyOnline(image_path, temp_path, brightness=35, contrast=11, left=0.36, top=0.78, right=4.26, bottom=1.96, delta=0.6, name="temp"):
+    img = apply_brightness_contrast(correct_skew(passportCV(image_path=image_path, temp_path=temp_path), delta=delta, limit=1)[1], brightness, contrast)
+    img1 = faceIDFull(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
+    rect = deleteBlackBorder(img1)
+    im = passportUpscaleNative(rect)
+    return(im)
+
 
 
 #####################################
@@ -434,11 +562,20 @@ def detectRectangleCrop(img):
 ####This implementation uses pytorch and the MTCNN trained network (specifically InceptionResNetV1 and VGG. Code for both GPU (e.g. cuda) and cpu implementation are provided, we default to cpu here.
 
 
+def mtcnnResults(data):
+    result = detector.detect_faces(data)[0]
+    boxes = np.expand_dims(np.array(result['box']), axis=0)
+    boxes[0][2] = boxes[0][0] + boxes[0][2]
+    boxes[0][3] = boxes[0][1] + boxes[0][3]
+    probs = np.expand_dims(result['confidence'], axis=0)
+    landmarks = np.expand_dims(np.array(list(result['keypoints'].values()),  dtype="float32"), axis=0)
+    return boxes, probs, landmarks
+
 ####Face Recogniton check
 def draw_image_with_boxes(filename):
     # load the image
     data = correct_skew(passportCV(filename), delta=0.5, limit=1)[1]
-    boxes, probs, landmarks = detector.detect(data, landmarks=True)
+    boxes, probs, landmarks = mtcnnResults(data)
     # plot the image
     fig, ax = plt.subplots(figsize=(16, 12))
     ax.imshow(data)
@@ -467,7 +604,7 @@ def draw_image_with_boxes(filename):
 ####Same as above, but you can put a numpy darray instead of a filepath
 def draw_image_with_boxes_debug(data):
     # load the image
-    boxes, probs, landmarks = detector.detect(data, landmarks=True)
+    boxes, probs, landmarks = mtcnnResults(data)
     # plot the image
     fig, ax = plt.subplots(figsize=(16, 12))
     ax.imshow(data)
@@ -519,10 +656,9 @@ def faceDegrees(landmarks):
     m2 = faceSlope(landmarks)
     return slopeAngle(m1, m2)
     
-
 ####Face ID detection. This is the basic function. It works by detecitng the face in the data, measures its height and width, and then adds multipliers (left, top, right, and bottom) to generate internall measures of passport dimensions.
 def faceIDSimple(data, left=0.64, top=0.875, right=4.2, bottom=2.5, delta=0.5):
-    boxes, probs, landmarks = detector.detect(data, landmarks=True)
+    boxes, probs, landmarks = mtcnnResults(data)
     throw = len(boxes)
     passport_dim = boxes[0]
     vert = passport_dim[2] - passport_dim[0]
@@ -545,10 +681,10 @@ def faceIDSimple(data, left=0.64, top=0.875, right=4.2, bottom=2.5, delta=0.5):
     return(im1)
 
 def faceIDPre(data, left=0.64, top=0.875, right=4.2, bottom=2.5, delta=0.5):
-    boxes, probs, landmarks = detector.detect(data, landmarks=True)
+    boxes, probs, landmarks = mtcnnResults(data)
     data = rotate(data, angle=faceDegrees(landmarks))
     data = correct_skew(data, delta=delta, limit=1)[1]
-    boxes, probs, landmarks = detector.detect(data, landmarks=True)
+    boxes, probs, landmarks = mtcnnResults(data)
     throw = len(boxes)
     passport_dim = boxes[0]
     vert = passport_dim[2] - passport_dim[0]
@@ -622,6 +758,7 @@ def readMRZCrop(image_path):
     rect = deleteBlackBorder(img1)
     #rect = deleteWhiteBorder(rect)
     #rect = deleteBlackBorder(rect)
+    rect = passportUpscale(rect)
     im = Image.fromarray(rect)
     im.save(file + "_temp.jpeg", "JPEG")
     result = readMRZ(file + "_temp.jpeg")
@@ -635,8 +772,11 @@ def readMRZCropFile(image_path, temp_path, brightness=-27, contrast=-32, left=0.
         img1 = correct_skew(img1, delta=delta, limit=1)[1]
         rect = deleteBlackBorder(img1)
         im = Image.fromarray(rect)
-        im.save(temp_path + name + ".jpeg", "JPEG")
-        result = readMRZ(temp_path + name + ".jpeg")
+        im.save(temp_path + name + "_Final.jpeg", "JPEG")
+        result = readMRZ(temp_path + name + "_Final.jpeg")
+        rect = passportUpscale(rect)
+        im = Image.fromarray(cv2.cvtColor(rect, cv2.COLOR_BGR2RGB))
+        im.save(temp_path + name + "_Final.jpeg", "JPEG")
         return result
     except:
         img = np.rot90(img, k=2)
@@ -644,8 +784,11 @@ def readMRZCropFile(image_path, temp_path, brightness=-27, contrast=-32, left=0.
         img1 = correct_skew(img1, delta=delta, limit=1)[1]
         rect = deleteBlackBorder(img1)
         im = Image.fromarray(rect)
-        im.save(temp_path + name + ".jpeg", "JPEG")
-        result = readMRZ(temp_path + name + ".jpeg")
+        im.save(temp_path + name + "_Final.jpeg", "JPEG")
+        result = readMRZ(temp_path + name + "_Final.jpeg")
+        rect = passportUpscale(rect)
+        im = Image.fromarray(cv2.cvtColor(rect, cv2.COLOR_BGR2RGB))
+        im.save(temp_path + name + "_Final.jpeg", "JPEG")
         return result
 
 
@@ -655,17 +798,24 @@ def readMRZCropOnline(image_path, temp_path, brightness=-27, contrast=-32, left=
     try:
         img1 = faceIDSimple(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
         rect = deleteBlackBorder(img1)
+        rect = passportUpscale(rect)
         im = Image.fromarray(rect)
-        im.save(temp_path + name + ".jpeg", "JPEG")
-        result = readMRZ(temp_path + name + ".jpeg")
+        im.save(temp_path + name + "_Final.jpeg", "JPEG")
+        result = readMRZ(temp_path + name + "_Final.jpeg")
+        rect = passportUpscale(rect)
+        im = Image.fromarray(cv2.cvtColor(rect, cv2.COLOR_BGR2RGB))
+        im.save(temp_path + name + "_Final.jpeg", "JPEG")
         return result
     except:
         img = np.rot90(img, k=2)
         img1 = faceIDFull(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
         rect = deleteBlackBorder(img1)
         im = Image.fromarray(rect)
-        im.save(temp_path + name + ".jpeg", "JPEG")
-        result = readMRZ(temp_path + name + ".jpeg")
+        im.save(temp_path + name + "_Final.jpeg", "JPEG")
+        result = readMRZ(temp_path + name + "_Final.jpeg")
+        rect = passportUpscale(rect)
+        im = Image.fromarray(cv2.cvtColor(rect, cv2.COLOR_BGR2RGB))
+        im.save(temp_path + name + "_Final.jpeg", "JPEG")
         return result
 
 ###Numpy darray combination of facial recogniton and tesseract. Note that this will atempt once, flip upsidedown, then continue. This assumes images have already been loaded
@@ -674,7 +824,8 @@ def readMRZCropNative(image_object, temp_path, brightness=-27, contrast=-32, lef
     try:
         img1 = faceIDSimple(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
         rect = deleteBlackBorder(img1)
-        im = Image.fromarray(rect)
+        rect = passportUpscale(rect)
+        im = Image.fromarray(cv2.cvtColor(rect, cv2.COLOR_BGR2RGB))
         im.save(temp_path + name + ".jpeg", "JPEG")
         result = readMRZ(temp_path + name + ".jpeg")
         return result
@@ -682,7 +833,8 @@ def readMRZCropNative(image_object, temp_path, brightness=-27, contrast=-32, lef
         img = np.rot90(img, k=2)
         img1 = faceIDFull(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
         rect = deleteBlackBorder(img1)
-        im = Image.fromarray(rect)
+        rect = passportUpscale(rect)
+        im = Image.fromarray(cv2.cvtColor(rect, cv2.COLOR_BGR2RGB))
         im.save(temp_path + name + ".jpeg", "JPEG")
         result = readMRZ(temp_path + name + ".jpeg")
         return result
@@ -773,3 +925,10 @@ def readMRZCropBorders(image_path):
     im.save(file + "_temp.jpeg", "JPEG")
     result = readMRZ(file + "_temp.jpeg")
     return result
+
+
+
+
+
+
+
