@@ -89,14 +89,16 @@ def calculateAge(birthDatestring):
 
 ####Core Tesseract implementation function, uses ORCB and runs checks to make sure data is valid
 def readMRZ(image_path):
-	mrz = read_mrz(image_path, extra_cmdline_params='orcb')
-	mrz_dict = mrz.to_dict()
-	mrz_frame = pd.DataFrame.from_dict(mrz_dict, orient='index').transpose()
-	mrz_frame["Date of Birth"] = datetime.strptime(mrz_frame["date_of_birth"].astype("string")[0], "%y%m%d").strftime("%m/%d/%Y")
-	mrz_frame["Date of Expiry"] = datetime.strptime(mrz_frame["expiration_date"].astype("string")[0], "%y%m%d").strftime("%m/%d/%Y")
-	if calculateAge(mrz_frame["Date of Birth"].astype("string")[0])<0:
-		mrz_frame["Date of Birth"] = datetime.strftime(datetime.strptime(mrz_frame["Date of Birth"].astype("string")[0], "%m/%d/%Y") - relativedelta(years=100), "%m/%d/%Y")
-	return mrz_frame
+    mrz = read_mrz(image_path, extra_cmdline_params='--oem 0')
+    mrz_dict = mrz.to_dict()
+    mrz_frame = pd.DataFrame.from_dict(mrz_dict, orient='index').transpose()
+    mrz_frame["Date of Birth"] = datetime.strptime(mrz_frame["date_of_birth"].astype("string")[0], "%y%m%d").strftime("%m/%d/%Y")
+    mrz_frame["Date of Expiry"] = datetime.strptime(mrz_frame["expiration_date"].astype("string")[0], "%y%m%d").strftime("%m/%d/%Y")
+    mrz_frame["MRZ number"] = mrz_frame["number"][0].replace("0", "O")
+    if calculateAge(mrz_frame["Date of Birth"].astype("string")[0])<0:
+        mrz_frame["Date of Birth"] = datetime.strftime(datetime.strptime(mrz_frame["Date of Birth"].astype("string")[0], "%m/%d/%Y") - relativedelta(years=100), "%m/%d/%Y")
+    mrz_frame = mrz_frame.add_prefix('MRZ ')
+    return mrz_frame
 
 #####################################
 ###########Loading Data##############
@@ -253,9 +255,13 @@ def passportCVUpscaleOnline(image_path, temp_path="~/", name="temp"):
 
 
 ####Legacy image upscaling, depends on tensorflow 2.0 and ISR
+#Processing Ahmadi Khorshid  1152021163507
 
 def passportUpscale(data):
-    sr_img = rrdn.predict(data)
+    if data.nbytes < 18000000:
+        sr_img = rrdn.predict(data)
+    else:
+        sr_img = data
     #sr_img = rdn.predict(sr_img)
     return(sr_img)
     
@@ -773,59 +779,111 @@ def readMRZCrop(image_path):
     result = readMRZ(file + "_temp.jpeg")
     return result
 
+
 ###Local file combination of facial recogniton and tesseract. Note that this will atempt once, flip upsidedown, then continue.
 def readMRZCropFile(image_path, temp_path, brightness=-27, contrast=-32, left=0.64, top=0.875, right=4.2, bottom=2.5, delta=0.5, name="temp"):
     img = apply_brightness_contrast(correct_skew(passportCV(image_path=image_path, temp_path=temp_path), delta=delta, limit=1)[1], brightness, contrast)
     try:
-        img1 = faceIDSimple(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
-        img1 = correct_skew(img1, delta=delta, limit=1)[1]
-        rect = deleteBlackBorder(img1)
-        im = Image.fromarray(rect)
-        im.save(temp_path + name + "_Final.jpeg", "JPEG")
-        result = readMRZ(temp_path + name + "_Final.jpeg")
-        rect = passportUpscale(img)
-        im = Image.fromarray(cv2.cvtColor(rect, cv2.COLOR_BGR2RGB))
-        im.save(temp_path + name + "_Final.jpeg", "JPEG")
-        return result
+        try:
+            img1 = faceIDSimple(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
+            img1 = correct_skew(img1, delta=delta, limit=1)[1]
+            rect = deleteBlackBorder(img1)
+            im = Image.fromarray(rect)
+            im.save(temp_path + name + "_Final.jpeg", "JPEG")
+            result = readMRZ(temp_path + name + "_Final.jpeg")
+            rect = passportUpscale(img)
+            im = Image.fromarray(cv2.cvtColor(rect, cv2.COLOR_BGR2RGB))
+            im.save(temp_path + name + "_Final.jpeg", "JPEG")
+            return result
+        except:
+            img = np.rot90(img, k=2)
+            img1 = faceIDFull(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
+            img1 = correct_skew(img1, delta=delta, limit=1)[1]
+            rect = deleteBlackBorder(img1)
+            im = Image.fromarray(rect)
+            im.save(temp_path + name + "_Final.jpeg", "JPEG")
+            result = readMRZ(temp_path + name + "_Final.jpeg")
+            rect = passportUpscale(img)
+            im = Image.fromarray(cv2.cvtColor(rect, cv2.COLOR_BGR2RGB))
+            im.save(temp_path + name + "_Final.jpeg", "JPEG")
+            return result
     except:
-        img = np.rot90(img, k=2)
-        img1 = faceIDFull(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
-        img1 = correct_skew(img1, delta=delta, limit=1)[1]
-        rect = deleteBlackBorder(img1)
-        im = Image.fromarray(rect)
-        im.save(temp_path + name + "_Final.jpeg", "JPEG")
-        result = readMRZ(temp_path + name + "_Final.jpeg")
-        rect = passportUpscale(img)
+        rect1 = passportUpscale(img)
         im = Image.fromarray(cv2.cvtColor(rect, cv2.COLOR_BGR2RGB))
         im.save(temp_path + name + "_Final.jpeg", "JPEG")
-        return result
-
 
 ###URL fetching combination of facial recogniton and tesseract. Note that this will atempt once, flip upsidedown, then continue.
 def readMRZCropOnline(image_path, temp_path, brightness=-27, contrast=-32, left=0.64, top=0.875, right=4.2, bottom=2.5, delta=0.5, name="temp"):
     img = apply_brightness_contrast(correct_skew(passportCVOnline(image_path=image_path, temp_path=temp_path), delta=delta, limit=1)[1], brightness, contrast)
     try:
-        img1 = faceIDSimple(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
-        rect = deleteBlackBorder(img1)
-        rect = passportUpscale(rect)
-        im = Image.fromarray(rect)
-        im.save(temp_path + name + "_Final.jpeg", "JPEG")
-        result = readMRZ(temp_path + name + "_Final.jpeg")
-        rect = passportUpscale(img)
-        im = Image.fromarray(cv2.cvtColor(rect, cv2.COLOR_BGR2RGB))
-        im.save(temp_path + name + "_Final.jpeg", "JPEG")
-        return result
+        try:
+            img1 = faceIDSimple(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
+            rect = deleteBlackBorder(img1)
+            rect = passportUpscale(rect)
+            im = Image.fromarray(rect)
+            im.save(temp_path + name + "_Final.jpeg", "JPEG")
+            result = readMRZ(temp_path + name + "_Final.jpeg")
+            rect = passportUpscale(img)
+            im = Image.fromarray(cv2.cvtColor(rect, cv2.COLOR_BGR2RGB))
+            im.save(temp_path + name + "_Final.jpeg", "JPEG")
+            return result
+        except:
+            img = np.rot90(img, k=2)
+            img1 = faceIDFull(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
+            rect = deleteBlackBorder(img1)
+            im = Image.fromarray(rect)
+            im.save(temp_path + name + "_Final.jpeg", "JPEG")
+            result = readMRZ(temp_path + name + "_Final.jpeg")
+            rect = passportUpscale(img)
+            im = Image.fromarray(cv2.cvtColor(rect, cv2.COLOR_BGR2RGB))
+            im.save(temp_path + name + "_Final.jpeg", "JPEG")
+            return result
     except:
-        img = np.rot90(img, k=2)
-        img1 = faceIDFull(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
-        rect = deleteBlackBorder(img1)
-        im = Image.fromarray(rect)
-        im.save(temp_path + name + "_Final.jpeg", "JPEG")
-        result = readMRZ(temp_path + name + "_Final.jpeg")
         rect = passportUpscale(img)
         im = Image.fromarray(cv2.cvtColor(rect, cv2.COLOR_BGR2RGB))
         im.save(temp_path + name + "_Final.jpeg", "JPEG")
-        return result
+        
+def readMRZCropOnlineSimple(image_path, temp_path, brightness=-27, contrast=-32, left=0.64, top=0.875, right=4.2, bottom=2.5, delta=0.5, name="temp"):
+    img = apply_brightness_contrast(correct_skew(passportCVOnline(image_path=image_path, temp_path=temp_path), delta=delta, limit=1)[1], brightness, contrast)
+    try:
+        try:
+            img1 = faceIDSimple(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
+            rect = deleteBlackBorder(img1)
+            #rect = passportUpscale(rect)
+            im = Image.fromarray(rect)
+            im.save(temp_path + name + "_Final.jpeg", "JPEG")
+            result = readMRZ(temp_path + name + "_Final.jpeg")
+            return result
+        except:
+            try:
+                img1 = faceIDSimple(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
+                rect = deleteBlackBorder(img1)
+                rect = deleteWhiteBorder(rect)
+                im = Image.fromarray(rect)
+                im.save(temp_path + name + "_Final.jpeg", "JPEG")
+                result = readMRZ(temp_path + name + "_Final.jpeg")
+                return result
+            except:
+                try:
+                    img1 = faceIDSimple(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
+                    rect = deleteBlackBorder(img1)
+                    rect = deleteWhiteBorder(rect)
+                    rect = deleteBlackBorder(rect)
+                    im = Image.fromarray(rect)
+                    im.save(temp_path + name + "_Final.jpeg", "JPEG")
+                    result = readMRZ(temp_path + name + "_Final.jpeg")
+                    return result
+                except:
+                    img = np.rot90(img, k=2)
+                    img1 = faceIDFull(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
+                    rect = deleteBlackBorder(img1)
+                    im = Image.fromarray(rect)
+                    im.save(temp_path + name + "_Final.jpeg", "JPEG")
+                    result = readMRZ(temp_path + name + "_Final.jpeg")
+                    return result
+    except:
+        pass
+
 
 ###Numpy darray combination of facial recogniton and tesseract. Note that this will atempt once, flip upsidedown, then continue. This assumes images have already been loaded
 def readMRZCropNative(image_object, temp_path, brightness=-27, contrast=-32, left=0.64, top=0.875, right=4.2, bottom=2.5, delta=0.5, name="temp"):
