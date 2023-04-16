@@ -8,8 +8,12 @@
 
 #pip install pytesseract pyttsx3 typing blend_modes pyspellchecker pdf2image pillow passporteye matplotlib openpyxl imutils numpy scipy pandas multiprocess opencv-python mtcnn
 
+#cd "~/GitHub/image-super-resolution/"
+#pip install -e .
+
 # importing neccessary libraries
 
+import math
 import cv2
 import numpy as np
 import math
@@ -48,7 +52,7 @@ from time import sleep
 from multiprocessing import Pool
 import openpyxl
 import imutils
-from scipy.ndimage.interpolation import rotate
+from scipy.ndimage import rotate
 import pickle
 import importlib
 import sys
@@ -255,7 +259,6 @@ def passportCVUpscaleOnline(image_path, temp_path="~/", name="temp"):
 
 
 ####Legacy image upscaling, depends on tensorflow 2.0 and ISR
-#Processing Ahmadi Khorshid  1152021163507
 
 def passportUpscale(data):
     if data.nbytes < 18000000:
@@ -264,7 +267,7 @@ def passportUpscale(data):
         sr_img = data
     #sr_img = rdn.predict(sr_img)
     return(sr_img)
-    
+
 def passportUpscaleFile(filepath, temp_path="~/"):
     data = passportCV(image_path=filepath, temp_path=temp_path)
     data_upscale = passportUpscale(data)
@@ -282,6 +285,21 @@ def makePassportPrettyOnline(image_path, temp_path, brightness=35, contrast=11, 
     rect = deleteBlackBorder(img1)
     im = passportUpscaleNative(rect)
     return(im)
+
+
+
+import tensorflow as tf
+
+import os
+import math
+import numpy as np
+
+from tensorflow import keras
+from tensorflow.keras import layers
+from tensorflow.keras.preprocessing.image import load_img
+from tensorflow.keras.preprocessing.image import array_to_img
+from tensorflow.keras.preprocessing.image import img_to_array
+#from tensorflow.keras.preprocessing import image_dataset_from_directory
 
 
 
@@ -668,6 +686,7 @@ def faceDegrees(landmarks):
     m2 = faceSlope(landmarks)
     return slopeAngle(m1, m2)
     
+    
 ####Face ID detection. This is the basic function. It works by detecitng the face in the data, measures its height and width, and then adds multipliers (left, top, right, and bottom) to generate internall measures of passport dimensions.
 def faceIDSimple(data, left=0.64, top=0.875, right=4.2, bottom=2.5, delta=0.5):
     #boxes, probs, landmarks = mtcnnResults(data)
@@ -813,13 +832,16 @@ def readMRZCropFile(image_path, temp_path, brightness=-27, contrast=-32, left=0.
         im.save(temp_path + name + "_Final.jpeg", "JPEG")
 
 ###URL fetching combination of facial recogniton and tesseract. Note that this will atempt once, flip upsidedown, then continue.
-def readMRZCropOnline(image_path, temp_path, brightness=-27, contrast=-32, left=0.64, top=0.875, right=4.2, bottom=2.5, delta=0.5, name="temp"):
+def readMRZCropOnline(image_path, temp_path, brightness=-27, contrast=-32, left=0.68, top=0.52, right=4.56, bottom=1.8, delta=0.25, name="temp"):
     img = apply_brightness_contrast(correct_skew(passportCVOnline(image_path=image_path, temp_path=temp_path), delta=delta, limit=1)[1], brightness, contrast)
+    height = bottom - top
+    width = right - left
+    
     try:
         try:
             img1 = faceIDSimple(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
             rect = deleteBlackBorder(img1)
-            rect = passportUpscale(rect)
+            #rect = passportUpscale(rect)
             im = Image.fromarray(rect)
             im.save(temp_path + name + "_Final.jpeg", "JPEG")
             result = readMRZ(temp_path + name + "_Final.jpeg")
@@ -843,14 +865,17 @@ def readMRZCropOnline(image_path, temp_path, brightness=-27, contrast=-32, left=
         im = Image.fromarray(cv2.cvtColor(rect, cv2.COLOR_BGR2RGB))
         im.save(temp_path + name + "_Final.jpeg", "JPEG")
         
-def readMRZCropOnlineSimple(image_path, temp_path, brightness=-27, contrast=-32, left=0.64, top=0.875, right=4.2, bottom=2.5, delta=0.5, name="temp"):
+def readMRZCropOnlineRotate(image_path, temp_path, brightness=-27, contrast=-32, left=0.64, top=0.875, right=4.2, bottom=2.5, delta=0.5, name="temp"):
     img = apply_brightness_contrast(correct_skew(passportCVOnline(image_path=image_path, temp_path=temp_path), delta=delta, limit=1)[1], brightness, contrast)
+    height = bottom - top
+    width = right - left
     try:
         try:
             img1 = faceIDSimple(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
             rect = deleteBlackBorder(img1)
             #rect = passportUpscale(rect)
             im = Image.fromarray(rect)
+            im = im.resize((1020, math.ceil(1020*(im.size[1]/im.size[0]))), Image.ANTIALIAS)
             im.save(temp_path + name + "_Final.jpeg", "JPEG")
             result = readMRZ(temp_path + name + "_Final.jpeg")
             return result
@@ -860,6 +885,7 @@ def readMRZCropOnlineSimple(image_path, temp_path, brightness=-27, contrast=-32,
                 rect = deleteBlackBorder(img1)
                 rect = deleteWhiteBorder(rect)
                 im = Image.fromarray(rect)
+                im = im.resize((1020, math.ceil(1020*(im.size[1]/im.size[0]))), Image.ANTIALIAS)
                 im.save(temp_path + name + "_Final.jpeg", "JPEG")
                 result = readMRZ(temp_path + name + "_Final.jpeg")
                 return result
@@ -870,6 +896,7 @@ def readMRZCropOnlineSimple(image_path, temp_path, brightness=-27, contrast=-32,
                     rect = deleteWhiteBorder(rect)
                     rect = deleteBlackBorder(rect)
                     im = Image.fromarray(rect)
+                    im = im.resize((1020, math.ceil(1020*(im.size[1]/im.size[0]))), Image.ANTIALIAS)
                     im.save(temp_path + name + "_Final.jpeg", "JPEG")
                     result = readMRZ(temp_path + name + "_Final.jpeg")
                     return result
@@ -878,12 +905,127 @@ def readMRZCropOnlineSimple(image_path, temp_path, brightness=-27, contrast=-32,
                     img1 = faceIDFull(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
                     rect = deleteBlackBorder(img1)
                     im = Image.fromarray(rect)
+                    im = im.resize((1020, math.ceil(1020*(im.size[1]/im.size[0]))), Image.ANTIALIAS)
                     im.save(temp_path + name + "_Final.jpeg", "JPEG")
                     result = readMRZ(temp_path + name + "_Final.jpeg")
                     return result
     except:
         pass
 
+def readMRZCropOnlineSimple(image_path, temp_path, brightness=-27, contrast=-32, left=0.64, top=0.875, right=4.2, bottom=2.5, delta=0.5, name="temp"):
+    img = apply_brightness_contrast(correct_skew(passportCVOnline(image_path=image_path, temp_path=temp_path), delta=delta, limit=1)[1], brightness, contrast)
+    try:
+        try:
+            img1 = faceIDSimple(img, left=left, top=top, right=right, bottom=bottom, delta=delta)
+            rect = deleteBlackBorder(img1)
+            #rect = passportUpscale(rect)
+            im = Image.fromarray(rect)
+            im = im.resize((1020, math.ceil(1020*(im.size[1]/im.size[0]))), Image.ANTIALIAS)
+            im.save(temp_path + name + "_Final.jpeg", "JPEG")
+            result = readMRZ(temp_path + name + "_Final.jpeg")
+            return result
+        except:
+            try:
+                img1 = faceIDSimple(img, left=left, top=top, right=right, bottom=bottom-0.2, delta=delta)
+                rect = deleteBlackBorder(img1)
+                im = Image.fromarray(rect)
+                im = im.resize((1020, math.ceil(1020*(im.size[1]/im.size[0]))), Image.ANTIALIAS)
+                im.save(temp_path + name + "_Final.jpeg", "JPEG")
+                result = readMRZ(temp_path + name + "_Final.jpeg")
+                return result
+            except:
+                try:
+                    img1 = faceIDSimple(img, left=left, top=top, right=right, bottom=bottom-0.4, delta=delta)
+                    rect = deleteBlackBorder(img1)
+                    im = Image.fromarray(rect)
+                    im = im.resize((1020, math.ceil(1020*(im.size[1]/im.size[0]))), Image.ANTIALIAS)
+                    im.save(temp_path + name + "_Final.jpeg", "JPEG")
+                    result = readMRZ(temp_path + name + "_Final.jpeg")
+                    return result
+                except:
+                    try:
+                        img1 = faceIDSimple(img, left=left, top=top, right=right, bottom=bottom-0.6, delta=delta)
+                        rect = deleteBlackBorder(img1)
+                        im = Image.fromarray(rect)
+                        im = im.resize((1020, math.ceil(1020*(im.size[1]/im.size[0]))), Image.ANTIALIAS)
+                        im.save(temp_path + name + "_Final.jpeg", "JPEG")
+                        result = readMRZ(temp_path + name + "_Final.jpeg")
+                        return result
+                    except:
+                        try:
+                            img1 = faceIDSimple(img, left=left-0.2, top=top, right=right, bottom=bottom, delta=delta)
+                            rect = deleteBlackBorder(img1)
+                            #rect = passportUpscale(rect)
+                            im = Image.fromarray(rect)
+                            im = im.resize((1020, math.ceil(1020*(im.size[1]/im.size[0]))), Image.ANTIALIAS)
+                            im.save(temp_path + name + "_Final.jpeg", "JPEG")
+                            result = readMRZ(temp_path + name + "_Final.jpeg")
+                            return result
+                        except:
+                            try:
+                                img1 = faceIDSimple(img, left=left-0.2, top=top, right=right, bottom=bottom-0.2, delta=delta)
+                                rect = deleteBlackBorder(img1)
+                                im = Image.fromarray(rect)
+                                im = im.resize((1020, math.ceil(1020*(im.size[1]/im.size[0]))), Image.ANTIALIAS)
+                                im.save(temp_path + name + "_Final.jpeg", "JPEG")
+                                result = readMRZ(temp_path + name + "_Final.jpeg")
+                                return result
+                            except:
+                                try:
+                                    img1 = faceIDSimple(img, left=left-0.2, top=top, right=right, bottom=bottom-0.4, delta=delta)
+                                    rect = deleteBlackBorder(img1)
+                                    im = Image.fromarray(rect)
+                                    im = im.resize((1020, math.ceil(1020*(im.size[1]/im.size[0]))), Image.ANTIALIAS)
+                                    im.save(temp_path + name + "_Final.jpeg", "JPEG")
+                                    result = readMRZ(temp_path + name + "_Final.jpeg")
+                                    return result
+                                except:
+                                    try:
+                                        img1 = faceIDSimple(img, left=left-0.2, top=top, right=right, bottom=bottom-0.6, delta=delta)
+                                        rect = deleteBlackBorder(img1)
+                                        im = Image.fromarray(rect)
+                                        im = im.resize((1020, math.ceil(1020*(im.size[1]/im.size[0]))), Image.ANTIALIAS)
+                                        im.save(temp_path + name + "_Final.jpeg", "JPEG")
+                                        result = readMRZ(temp_path + name + "_Final.jpeg")
+                                        return result
+                                    except:
+                                        try:
+                                            img1 = faceIDSimple(img, left=left-0.4, top=top, right=right, bottom=bottom, delta=delta)
+                                            rect = deleteBlackBorder(img1)
+                                            #rect = passportUpscale(rect)
+                                            im = Image.fromarray(rect)
+                                            im = im.resize((1020, math.ceil(1020*(im.size[1]/im.size[0]))), Image.ANTIALIAS)
+                                            im.save(temp_path + name + "_Final.jpeg", "JPEG")
+                                            result = readMRZ(temp_path + name + "_Final.jpeg")
+                                            return result
+                                        except:
+                                            try:
+                                                img1 = faceIDSimple(img, left=left-0.4, top=top, right=right, bottom=bottom-0.2, delta=delta)
+                                                rect = deleteBlackBorder(img1)
+                                                im = Image.fromarray(rect)
+                                                im = im.resize((1020, math.ceil(1020*(im.size[1]/im.size[0]))), Image.ANTIALIAS)
+                                                im.save(temp_path + name + "_Final.jpeg", "JPEG")
+                                                result = readMRZ(temp_path + name + "_Final.jpeg")
+                                                return result
+                                            except:
+                                                try:
+                                                    img1 = faceIDSimple(img, left=left-0.4, top=top, right=right, bottom=bottom-0.4, delta=delta)
+                                                    rect = deleteBlackBorder(img1)
+                                                    im = Image.fromarray(rect)
+                                                    im = im.resize((1020, math.ceil(1020*(im.size[1]/im.size[0]))), Image.ANTIALIAS)
+                                                    im.save(temp_path + name + "_Final.jpeg", "JPEG")
+                                                    result = readMRZ(temp_path + name + "_Final.jpeg")
+                                                    return result
+                                                except:
+                                                    img1 = faceIDSimple(img, left=left-0.4, top=top, right=right, bottom=bottom-0.6, delta=delta)
+                                                    rect = deleteBlackBorder(img1)
+                                                    im = Image.fromarray(rect)
+                                                    im = im.resize((1020, math.ceil(1020*(im.size[1]/im.size[0]))), Image.ANTIALIAS)
+                                                    im.save(temp_path + name + "_Final.jpeg", "JPEG")
+                                                    result = readMRZ(temp_path + name + "_Final.jpeg")
+                                                    return result
+    except:
+        pass
 
 ###Numpy darray combination of facial recogniton and tesseract. Note that this will atempt once, flip upsidedown, then continue. This assumes images have already been loaded
 def readMRZCropNative(image_object, temp_path, brightness=-27, contrast=-32, left=0.64, top=0.875, right=4.2, bottom=2.5, delta=0.5, name="temp"):
@@ -911,7 +1053,7 @@ def readMRZCropNative(image_object, temp_path, brightness=-27, contrast=-32, lef
 def passportSheetEvaluate(worksheet, row, temp_path):
     worksheet_sub = worksheet.iloc[row,]
     try:
-        passport_text = readMRZCropOnline(image_path=worksheet_sub["Passport Link"], temp_path="/Users/lee/Desktop/Passport Training/")
+        passport_text = readMRZCropOnline(image_path=worksheet_sub["Passport Link"], temp_path="~/Desktop/Passport Training/")
         worksheet_sub["Verified"] = "Yes"
         worksheet_sub["AIBirthday"] = passport_text["Date of Birth"][0]
         worksheet_sub["AIExpiry"] = passport_text["Date of Expiry"][0]

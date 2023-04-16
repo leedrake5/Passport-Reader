@@ -45,7 +45,7 @@ from time import sleep
 from multiprocessing import Pool
 import openpyxl
 import imutils
-from scipy.ndimage.interpolation import rotate
+from scipy.ndimage import rotate
 import pickle
 
 ####Avoid unecessary warnings
@@ -692,7 +692,7 @@ def readMRZCropNative(image_object, temp_path, brightness=-27, contrast=-32, lef
 def passportSheetEvaluate(worksheet, row, temp_path):
     worksheet_sub = worksheet.iloc[row,]
     try:
-        passport_text = readMRZCropOnline(image_path=worksheet_sub["Passport Link"], temp_path="/Users/lee/Desktop/Passport Training/")
+        passport_text = readMRZCropOnline(image_path=worksheet_sub["Passport Link"], temp_path="~/Desktop/Passport Training/")
         worksheet_sub["Verified"] = "Yes"
         worksheet_sub["AIBirthday"] = passport_text["Date of Birth"][0]
         worksheet_sub["AIExpiry"] = passport_text["Date of Expiry"][0]
